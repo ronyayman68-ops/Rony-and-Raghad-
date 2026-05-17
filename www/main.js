@@ -60,15 +60,26 @@ const player = {
   dashRegen: 0.002,
 };
 
-// ---------------- INPUT ----------------
+// ---------------- TOUCH TRACKING VARIABLES ----------------
+
+let touchX = null;
+let touchY = null;
+let isTouching = false;
+let lastTap = 0;
+let isMobileUser = false; // Automatically flags true if they use a touch gesture
+
+// ---------------- INPUT LISTENERS (KEYBOARD & TOUCH) ----------------
 
 const keys = {};
 
+// Keyboard Listeners
 window.addEventListener("keydown", (e) => {
   keys[e.key.toLowerCase()] = true;
+  isMobileUser = false; // User is on a keyboard
 
   if (!gameStarted && e.key === "Enter") {
     gameStarted = true;
+    lastScoreTime = performance.now();
   }
 
   if (gameOver && e.key.toLowerCase() === "r") {
@@ -84,7 +95,44 @@ window.addEventListener("keyup", (e) => {
   keys[e.key.toLowerCase()] = false;
 });
 
-// ---------------- DASH ----------------
+// Mobile Touch Listeners
+window.addEventListener("touchstart", (e) => {
+  isTouching = true;
+  isMobileUser = true; // Flag user as playing on mobile layout
+  touchX = e.touches[0].clientX;
+  touchY = e.touches[0].clientY;
+
+  // Touch triggers for Start and Restart Screens
+  if (!gameStarted) {
+    gameStarted = true;
+    lastScoreTime = performance.now();
+  }
+  if (gameOver) {
+    restartGame();
+  }
+
+  // Handle Double-Tap to Dash
+  const currentTime = performance.now();
+  const tapLength = currentTime - lastTap;
+  if (tapLength < 300 && tapLength > 0) {
+    if (player.canDash && gameStarted && !gameOver) {
+      dash();
+    }
+  }
+  lastTap = currentTime;
+});
+
+window.addEventListener("touchmove", (e) => {
+  if (!gameStarted || gameOver) return;
+  touchX = e.touches[0].clientX;
+  touchY = e.touches[0].clientY;
+});
+
+window.addEventListener("touchend", () => {
+  isTouching = false;
+});
+
+// ---------------- DASH LOGIC ----------------
 
 function dash() {
   if (player.dashEnergy < player.dashDrain) return;
@@ -111,23 +159,6 @@ function drawBackground() {
 
   ctx.fillStyle = "rgba(0,0,0,0.35)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  ctx.strokeStyle = "rgba(0,255,255,0.08)";
-  ctx.lineWidth = 1;
-
-  for (let i = 0; i < canvas.width; i += 60) {
-    ctx.beginPath();
-    ctx.moveTo(i, canvas.height / 2);
-    ctx.lineTo(i, canvas.height);
-    ctx.stroke();
-  }
-
-  for (let i = canvas.height / 2; i < canvas.height; i += 40) {
-    ctx.beginPath();
-    ctx.moveTo(0, i);
-    ctx.lineTo(canvas.width, i);
-    ctx.stroke();
-  }
 }
 
 // ---------------- HOLOGRAM PANEL ----------------
@@ -139,7 +170,7 @@ function drawHologramPanel(x, y, w, h, color) {
   ctx.fillRect(x, y, w, h);
 
   ctx.shadowColor = color;
-  ctx.shadowBlur = 20 + Math.sin(t * 0.005) * 5;
+  ctx.shadowBlur = 15 + Math.sin(t * 0.005) * 5;
 
   ctx.strokeStyle = color;
   ctx.lineWidth = 2;
@@ -151,6 +182,8 @@ function drawHologramPanel(x, y, w, h, color) {
 // ---------------- DASH RING ----------------
 
 function drawDashEnergyRing() {
+  if (!gameStarted) return;
+
   const x = player.x;
   const y = player.y;
   const r = player.radius + 18;
@@ -246,7 +279,7 @@ function spawnCreep() {
   creeps.push(creep);
 }
 
-setInterval(spawnCreep, spawnRate);
+let spawnInterval = setInterval(spawnCreep, spawnRate);
 
 // ---------------- MOVEMENT ----------------
 
@@ -255,13 +288,33 @@ function movePlayer() {
 
   const speed = player.isDashing ? player.dashSpeed : player.speed;
 
-  if (keys["w"]) player.y -= speed;
-  if (keys["s"]) player.y += speed;
-  if (keys["a"]) player.x -= speed;
-  if (keys["d"]) player.x += speed;
+  // Handle Touch Engine Interpolation
+  if (isTouching && touchX !== null && touchY !== null) {
+    const dx = touchX - player.x;
+    const dy = touchY - player.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    if (distance > 5) {
+      player.x += (dx / distance) * speed;
+      player.y += (dy / distance) * speed;
+    }
+  } 
+  // Fallback Keyboard Handler
+  else {
+    if (keys["w"]) player.y -= speed;
+    if (keys["s"]) player.y += speed;
+    if (keys["a"]) player.x -= speed;
+    if (keys["d"]) player.x += speed;
+  }
+
+  // Prevent moving outside screen boundaries
+  if (player.x - player.radius < 0) player.x = player.radius;
+  if (player.x + player.radius > canvas.width) player.x = canvas.width - player.radius;
+  if (player.y - player.radius < 0) player.y = player.radius;
+  if (player.y + player.radius > canvas.height) player.y = canvas.height - player.radius;
 }
 
-// ---------------- PLAYER ----------------
+// ---------------- PLAYER DRAW ----------------
 
 function drawPlayer() {
   if (!gameStarted) return;
@@ -277,7 +330,7 @@ function drawPlayer() {
   ctx.shadowBlur = 0;
 }
 
-// ---------------- CREEPS ----------------
+// ---------------- CREEPS DRAW ----------------
 
 function drawCreeps() {
   creeps.forEach((c) => {
@@ -311,17 +364,20 @@ function drawCreeps() {
   });
 }
 
-// ---------------- SCORE HUD ----------------
+// ---------------- UI SCORE ----------------
 
 function drawScore() {
   if (!gameStarted) return;
 
+  displayedScore += (score - displayedScore) * 0.08;
+
   drawHologramPanel(20, 20, 280, 140, COLORS.uiGlow);
 
   ctx.save();
-
   ctx.fillStyle = COLORS.text;
   ctx.font = "18px monospace";
+  ctx.textAlign = "left";
+
   ctx.shadowColor = COLORS.uiGlow;
   ctx.shadowBlur = 10;
 
@@ -358,10 +414,20 @@ function drawStartScreen() {
   ctx.fillText("DODGE", canvas.width / 2, canvas.height / 2 - 50);
 
   ctx.shadowBlur = 0;
-
-  ctx.font = "28px monospace";
   ctx.fillStyle = COLORS.text;
-  ctx.fillText("PRESS ENTER", canvas.width / 2, canvas.height / 2 + 120);
+
+  // Change action message depending on screen format dynamically
+  if (isMobileUser) {
+    ctx.font = "24px monospace";
+    ctx.fillText("TAP SCREEN TO BOOT", canvas.width / 2, canvas.height / 2 + 120);
+    ctx.font = "16px monospace";
+    ctx.fillText("Drag to move | Double-tap to dash", canvas.width / 2, canvas.height / 2 + 160);
+  } else {
+    ctx.font = "28px monospace";
+    ctx.fillText("PRESS ENTER TO BOOT", canvas.width / 2, canvas.height / 2 + 120);
+    ctx.font = "16px monospace";
+    ctx.fillText("WASD to move | Space to dash", canvas.width / 2, canvas.height / 2 + 160);
+  }
 }
 
 // ---------------- GAME OVER ----------------
@@ -379,10 +445,14 @@ function drawGameOver() {
   ctx.fillText("SYSTEM FAIL", canvas.width / 2, canvas.height / 2);
 
   ctx.shadowBlur = 0;
-
   ctx.font = "20px monospace";
   ctx.fillStyle = COLORS.text;
-  ctx.fillText("PRESS R TO REBOOT", canvas.width / 2, canvas.height / 2 + 50);
+
+  if (isMobileUser) {
+    ctx.fillText("TAP SCREEN TO REBOOT", canvas.width / 2, canvas.height / 2 + 50);
+  } else {
+    ctx.fillText("PRESS R TO REBOOT", canvas.width / 2, canvas.height / 2 + 50);
+  }
 }
 
 // ---------------- RESTART ----------------
@@ -391,7 +461,7 @@ function restartGame() {
   gameOver = false;
   score = 0;
   displayedScore = 0;
-  creepSpeed = 2;
+  lastScoreTime = performance.now();
 
   creeps.length = 0;
   particles.length = 0;
@@ -411,16 +481,13 @@ function animate() {
   if (gameStarted && !gameOver) {
     const now = performance.now();
 
-    if (now - lastScoreTime > 1000) {
+    if (now - lastScoreTime >= 1000) {
       score += 1;
       lastScoreTime = now;
     }
   }
 
-  displayedScore += (score - displayedScore) * 0.08;
-
-  player.dashEnergy += player.dashRegen;
-  if (player.dashEnergy > 1) player.dashEnergy = 1;
+  player.dashEnergy = Math.min(1, player.dashEnergy + player.dashRegen);
 
   ctx.save();
 

@@ -1,0 +1,13 @@
+# Node dependencies
+node_modules/
+npm-debug.log*
+
+# Android build files and IDE junk
+android/.idea/
+android/.gradle/
+android/build/
+android/app/build/
+*.iml
+
+# Local distribution folder
+www/
